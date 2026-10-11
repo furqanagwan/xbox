@@ -6,9 +6,13 @@
  * @license     BSD 3-Clause License
  */
 
+#include <chrono>
 #include <filesystem>
+#include <fstream>
 #include <random>
 #include <string>
+#include <string_view>
+#include <thread>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -99,4 +103,53 @@ TEST_CASE("Installing needs a downloaded update", "[guide][app_update]") {
   CHECK_FALSE(error.empty());
   SkipAppUpdate();
   CHECK_FALSE(GetAppUpdateState().skipped);
+}
+
+namespace {
+
+void WriteFile(const std::filesystem::path& path, std::string_view text) {
+  std::filesystem::create_directories(path.parent_path());
+  std::ofstream(path, std::ios::binary) << text;
+}
+
+AppUpdateState CheckFromCache() {
+  CheckForAppUpdate(false);
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+  while (GetAppUpdateState().status == AppUpdateStatus::kChecking &&
+         std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  return GetAppUpdateState();
+}
+
+}
+
+TEST_CASE("A newer release is announced once, and not again after it is skipped",
+          "[guide][app_update]") {
+  TemporaryFolder folder;
+  const auto updates = folder.path / "local" / "updates";
+  WriteFile(updates / "releases.json",
+            R"([{"tag_name": "v0.1.0-alpha.2", "prerelease": true, "body": "Notes",
+                 "assets": [{"name": "007-QuantumOfSolace-0.1.0-alpha.2-win-x64.zip",
+                             "browser_download_url": "https://example.invalid/a.zip",
+                             "size": 100}]}])");
+  WriteFile(updates / "last-check.txt",
+            std::to_string(std::chrono::duration_cast<std::chrono::seconds>(
+                               std::chrono::system_clock::now().time_since_epoch())
+                               .count()));
+  ConfigureAppUpdate(Config(folder, "0.1.0-alpha.1"));
+
+  REQUIRE(CheckFromCache().status == AppUpdateStatus::kAvailable);
+  std::string version;
+  REQUIRE(TakeAppUpdateNotice(&version));
+  CHECK(version == "0.1.0-alpha.2");
+  CHECK_FALSE(TakeAppUpdateNotice(&version));
+
+  REQUIRE(CheckFromCache().status == AppUpdateStatus::kAvailable);
+  CHECK_FALSE(TakeAppUpdateNotice(&version));
+
+  SkipAppUpdate();
+  ConfigureAppUpdate(Config(folder, "0.1.0-alpha.1"));
+  REQUIRE(CheckFromCache().skipped);
+  CHECK_FALSE(TakeAppUpdateNotice(&version));
 }

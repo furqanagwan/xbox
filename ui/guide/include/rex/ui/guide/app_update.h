@@ -55,5 +55,6 @@ void DownloadAppUpdate();
 void SkipAppUpdate();
 bool InstallAppUpdate(std::string* error);
 bool RollBackAppUpdate(std::string* error);
+bool TakeAppUpdateNotice(std::string* version);
 
 }
