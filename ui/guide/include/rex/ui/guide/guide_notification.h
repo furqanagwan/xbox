@@ -12,6 +12,8 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
+#include <string>
 
 #include <rex/ui/guide/xbox_guide.h>
 #include <rex/ui/overlay/achievement_notification.h>
@@ -33,18 +35,25 @@ class GuideNotificationDialog final : public AchievementNotificationDialog {
   ~GuideNotificationDialog() override;
 
   void Push(const system::AchievementEvent& event) override;
+  void PushMessage(std::string text, std::string image);
 
  protected:
   void OnDraw(ImGuiIO& io) override;
 
  private:
-  void Start(const system::AchievementEvent& event, const Media& media);
+  struct Notice {
+    std::optional<system::AchievementEvent> achievement;
+    std::string text;
+    std::string image;
+  };
+
+  void Start(const Notice& notice, const Media& media);
 
   MediaSource source_;
   GuideFonts fonts_;
   std::unique_ptr<AchievementNotificationDialog> fallback_;
   std::mutex mutex_;
-  std::deque<system::AchievementEvent> queue_;
+  std::deque<Notice> queue_;
 
   std::shared_ptr<const GuideAssets> assets_;
   GuideMedia* media_ = nullptr;

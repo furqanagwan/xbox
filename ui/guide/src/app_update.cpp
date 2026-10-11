@@ -40,6 +40,8 @@ struct Updater {
   std::optional<update::AvailableUpdate> available;
   fs::path package_root;
   bool busy = false;
+  bool notice_pending = false;
+  std::string noticed_version;
 };
 
 Updater& Instance() {
@@ -135,6 +137,10 @@ void RunCheck(AppUpdateConfig config, bool use_cache) {
   updater.state.notes = PlainReleaseNotes(found->release.notes);
   updater.state.download_size = found->package.size;
   updater.state.skipped = skipped == updater.state.latest_version;
+  if (!updater.state.skipped && updater.noticed_version != updater.state.latest_version) {
+    updater.noticed_version = updater.state.latest_version;
+    updater.notice_pending = true;
+  }
   REXLOG_INFO("Game update: {} is available (running {})", updater.state.latest_version,
               config.current_version);
 }
@@ -312,6 +318,17 @@ void CheckForAppUpdate(bool force) {
   updater.state.status = AppUpdateStatus::kChecking;
   updater.state.error.clear();
   std::thread(RunCheck, updater.config, !force && CheckedRecently(updater.config)).detach();
+}
+
+bool TakeAppUpdateNotice(std::string* version) {
+  Updater& updater = Instance();
+  std::lock_guard lock(updater.mutex);
+  if (!updater.notice_pending) {
+    return false;
+  }
+  updater.notice_pending = false;
+  *version = updater.state.latest_version;
+  return true;
 }
 
 AppUpdateState GetAppUpdateState() {

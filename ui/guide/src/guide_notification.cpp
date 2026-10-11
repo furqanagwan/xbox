@@ -12,6 +12,8 @@
 
 #include <fmt/format.h>
 
+#include <rex/ui/guide/app_update.h>
+
 namespace rex::ui::guide {
 namespace {
 
@@ -63,10 +65,18 @@ void GuideNotificationDialog::Push(const system::AchievementEvent& event) {
     return;
   }
   std::lock_guard<std::mutex> lock(mutex_);
-  queue_.push_back(event);
+  queue_.push_back({event, {}, {}});
 }
 
-void GuideNotificationDialog::Start(const system::AchievementEvent& event, const Media& media) {
+void GuideNotificationDialog::PushMessage(std::string text, std::string image) {
+  if (!REXCVAR_GET(notifications_show)) {
+    return;
+  }
+  std::lock_guard<std::mutex> lock(mutex_);
+  queue_.push_back({std::nullopt, std::move(text), std::move(image)});
+}
+
+void GuideNotificationDialog::Start(const Notice& notice, const Media& media) {
   assets_ = media.assets;
   media_ = media.media;
   context_.skin = &assets_->skin;
@@ -82,8 +92,10 @@ void GuideNotificationDialog::Start(const system::AchievementEvent& event, const
     scene_.reset();
     return;
   }
-  popup_->SetText(UnlockText(assets_->xam_strings, event));
-  popup_->Set("ImagePath", xui::Value{std::string("xam://Achievement.png")});
+  popup_->SetText(notice.achievement ? UnlockText(assets_->xam_strings, *notice.achievement)
+                                     : notice.text);
+  popup_->Set("ImagePath",
+              xui::Value{notice.achievement ? std::string("xam://Achievement.png") : notice.image});
 
   popup_->Play("TransTo");
   last_tick_ = started_ = std::chrono::steady_clock::now();
@@ -91,8 +103,12 @@ void GuideNotificationDialog::Start(const system::AchievementEvent& event, const
 
 void GuideNotificationDialog::OnDraw(ImGuiIO& io) {
   const auto now = std::chrono::steady_clock::now();
+  if (std::string version; TakeAppUpdateNotice(&version)) {
+    PushMessage(fmt::format("Game update available\nGet version {} from the Guide.", version),
+                "xam://ico_32x_information.png");
+  }
   if (!scene_) {
-    std::optional<system::AchievementEvent> next;
+    std::optional<Notice> next;
     {
       std::lock_guard<std::mutex> lock(mutex_);
       if (!queue_.empty()) {
@@ -106,8 +122,10 @@ void GuideNotificationDialog::OnDraw(ImGuiIO& io) {
     if (media.unavailable || (media.assets && !media.assets->has_notify)) {
       std::lock_guard<std::mutex> lock(mutex_);
       if (fallback_) {
-        for (const auto& event : queue_) {
-          fallback_->Push(event);
+        for (const auto& notice : queue_) {
+          if (notice.achievement) {
+            fallback_->Push(*notice.achievement);
+          }
         }
       }
       queue_.clear();
